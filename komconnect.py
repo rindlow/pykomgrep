@@ -4,8 +4,6 @@
 # (C) 1999,2003 Kent Engström. Released under GPL.
 
 import getpass
-import sys
-import optparse # Requires Python 2.3
 import os
 
 import kom
@@ -16,24 +14,27 @@ import kom
 # -) ~/.komrc
 
 # Error reporting
-class Error(Exception): pass
+class Error(Exception):
+    pass
 
 # Add standard server, name and password arguments to an optparse
 # option parser.
 
+
 def add_server_name_password(parser):
-    ogrp = optparse.OptionGroup(parser, "Connection Options")
-    ogrp.add_option("--server",
-                    help="connect to SERVER")
-    ogrp.add_option("--name",
-                    help="login as NAME")
-    ogrp.add_option("--password",
-                    help="authenticate using PASS", metavar="PASS")
-    parser.add_option_group(ogrp)
+    ogrp = parser.add_argument_group("connection")
+    ogrp.add_argument("--server", action="store",
+                      help="connect to SERVER")
+    ogrp.add_argument("--name", action="store",
+                      help="login as NAME")
+    ogrp.add_argument("--password", action="store",
+                      help="authenticate using PASS", metavar="PASS")
 
 # Connect and login using the information in an optparse options object
 # (e.g. one set up using add_server_name_password)
-def connect_and_login(options, connection_class = kom.CachedConnection):
+
+
+def connect_and_login(options, connection_class=kom.CachedConnection):
 
     # Get server
     server = options.server
@@ -57,30 +58,27 @@ def connect_and_login(options, connection_class = kom.CachedConnection):
         if "KOMPASSWORD" in os.environ:
             password = os.environ["KOMPASSWORD"]
         else:
-            password = getpass.getpass("Password for %s on %s: " % (name,
-                                                                    server))
+            password = getpass.getpass(f"Password for {name} on {server}")
 
     # Connect
     try:
         conn = connection_class(server)
-    except:
-        (t, v, tb) = sys.exc_info()
-        raise Error("failed to connect (%s)" % t)
+    except kom.LocalError as err:
+        raise Error(f"failed to connect ({err})")
 
     # Lookup name
-    persons = conn.lookup_name(name, want_pers = 1, want_confs = 0)
+    persons = conn.lookup_name(name, want_pers=1, want_confs=0)
     if len(persons) == 0:
         raise Error("name not found")
     elif len(persons) != 1:
         raise Error("name not unique")
     person_no = persons[0][0]
-    
+
     # Login
     try:
         kom.ReqLogin(conn, person_no, password).response()
-    except kom.Error:
-        (t, v, tb) = sys.exc_info()
-        raise Error("failed to log in (%s)" % t)
+    except kom.Error as err:
+        raise Error(f"failed to log in ({err})")
 
     # Done!
     return conn
