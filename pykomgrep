@@ -2,6 +2,7 @@
 # -*- mode: python -*-
 
 import argparse
+import collections
 import os.path
 import re
 import time
@@ -20,19 +21,15 @@ def parsetime(string):
         raise argparse.ArgumentTypeError(f'{string:r} not in format %Y-%m-%d')
 
 
+TextStat = collections.namedtuple('TextStat', ['creation_time', 'encoding'])
+
+
 class ArgumentError(Exception):
     pass
 
 
 class EmptyListError(Exception):
     pass
-
-
-class TextStat:
-
-    def __init__(self, creation_time, encoding):
-        self.creation_time = creation_time
-        self.encoding = encoding
 
 
 class Cache:
@@ -79,7 +76,7 @@ class Cache:
             SELECT creation_time, encoding
               FROM textstat_cache
              WHERE textno = ?''', (textno,))
-        if res := cursor.fetchone(): # noqa E203,E231,E701
+        if res := cursor.fetchone():
             return TextStat(*res)
         return None
 
@@ -96,7 +93,7 @@ class Cache:
             SELECT content
               FROM text_cache
              WHERE textno = ?''', (textno,))
-        if res := cursor.fetchone(): # noqa E203,E231,E701
+        if res := cursor.fetchone():
             return res[0]
         return None
 
@@ -112,7 +109,7 @@ class Cache:
             SELECT max(local)
               FROM local_to_global_cache
              WHERE confno = ?''', (confno,))
-        if res := cursor.fetchone(): # noqa E203,E231,E701
+        if res := cursor.fetchone():
             return res[0]
         return None
 
@@ -140,7 +137,7 @@ class Cache:
             SELECT max(local)
               FROM created_texts_cache
              WHERE persno = ?''', (persno,))
-        if res := cursor.fetchone(): # noqa E203,E231,E701
+        if res := cursor.fetchone():
             return res[0]
         return None
 
@@ -188,12 +185,11 @@ class Textlist:
         self._reverse = not self._reverse
 
     def get_textnos_in_conf(self, conf_no):
-        if (start := self.cache.last_local(conf_no)  # noqa E203,E231,E701
-           ) is None:
+        if (start := self.cache.last_local(conf_no)) is None:
             conf = kom.ReqGetConfStat(self.conn, conf_no).response()
             start = conf.first_local_no
         texts = set(self.cache.global_text_list(conf_no))
-        while (ltg := kom.ReqLocalToGlobal(self.conn, # noqa E203,E231,E701
+        while (ltg := kom.ReqLocalToGlobal(self.conn,
                                            conf_no,
                                            start,
                                            255).response()).later_texts_exists:
@@ -208,12 +204,11 @@ class Textlist:
             self.textset.intersection_update(texts)
 
     def get_textnos_by_author(self, pers_no):
-        if (start := self.cache.last_created(pers_no) # noqa E203,E231,E701
-           ) is None:
+        if (start := self.cache.last_created(pers_no)) is None:
             pers = kom.ReqGetPersonStat(self.conn, pers_no).response()
             start = pers.first_created_local_no
         texts = set(self.cache.created_text_list(pers_no))
-        while (mct := kom.ReqMapCreatedTexts( # noqa E203,E231,E701
+        while (mct := kom.ReqMapCreatedTexts(
                 self.conn,
                 pers_no,
                 start,
@@ -232,14 +227,14 @@ class Textlist:
         marks = kom.ReqGetMarks(self.conn).response()
         texts = set(m.text_no for m in marks)
         texts.discard(0)
-        
+
         if self.is_empty():
             self.textset = texts
         else:
             self.textset.intersection_update(texts)
 
     def get_textstat(self, text_no):
-        if textstat := self.cache.textstat(text_no): # noqa E203,E231,E701
+        if textstat := self.cache.textstat(text_no):
             return textstat
 
         stat = kom.ReqGetTextStat(self.conn, text_no).response()
@@ -256,7 +251,7 @@ class Textlist:
         return textstat
 
     def get_text(self, text_no):
-        if text := self.cache.content(text_no): # noqa E203,E231,E701
+        if text := self.cache.content(text_no):
             return text
 
         try:
@@ -277,34 +272,33 @@ class Textlist:
             self.textset.clear()
             return
 
-        a = 0
-        b = len(texts) - 1
-        while a < b:
-            i = a + (b - a) // 2
+        left = 0
+        right = len(texts) - 1
+        while left < right:
+            i = left + (right - left) // 2
             if self.get_textstat(texts[i]).creation_time >= timestamp:
-                b = i
+                right = i
             else:
-                a = i + 1
-        self.textset = set(texts[a:])
-        
+                left = i + 1
+        self.textset = set(texts[left:])
 
     def texts_before(self, timestamp):
         texts = sorted(self.textset)
-        if self.get_textstat(self.texts[0]).creation_time >= timestamp:
+        if self.get_textstat(texts[0]).creation_time >= timestamp:
             self.textset.clear()
             return
-        if self.get_textstat(self.texts[-1]).creation_time < timestamp:
+        if self.get_textstat(texts[-1]).creation_time < timestamp:
             return
 
-        a = 0
-        b = len(texts) - 1
-        while a < b:
-            i = a + (b - a) / 2
+        left = 0
+        right = len(texts) - 1
+        while left < right:
+            i = left + (right - left) / 2
             if self.get_textstat(texts[i]).creation_time >= timestamp:
-                b = i
+                right = i
             else:
-                a = i + 1
-        self.textset = set(self.texts[:a])
+                left = i + 1
+        self.textset = set(texts[:left])
 
     def grep(self, pattern, include_subject, ignore_case):
         flags = 0
