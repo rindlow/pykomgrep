@@ -22,7 +22,7 @@ class Error(Exception):
 
 
 def add_server_name_password(parser):
-    ogrp = parser.add_argument_group("connection")
+    ogrp = parser.add_argument_group("connection arguments")
     ogrp.add_argument("--server", action="store",
                       help="connect to SERVER")
     ogrp.add_argument("--name", action="store",

@@ -2400,7 +2400,8 @@ class Stats:
 class Connection:
     # INITIALIZATION ETC.
 
-    def __init__(self, host, port=4894, user="", localbind=None):
+    def __init__(self, host, port=4894, user="", localbind=None, trace=False):
+        self.trace = trace
         # Create socket and connect
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if localbind is not None:
@@ -2686,7 +2687,8 @@ class Connection:
 
     # Send a raw string
     def send_string(self, s):
-        print((">>>", s))
+        if self.trace:
+            print(">>>", s)
         buf = s.encode('latin1')
         while len(buf) > 0:
             done = self.socket.send(buf)
@@ -2704,7 +2706,8 @@ class Connection:
             data = self.socket.recv(wanted)
             if len(data) == 0:
                 raise ReceiveError
-            print(("<<<", data))
+            if self.trace:
+                print("<<<", data)
             self.rb = self.rb[self.rb_pos:] + data
             self.rb_pos = 0
             self.rb_len = len(self.rb)
@@ -2724,8 +2727,8 @@ class Connection:
         self.ensure_receive_buffer_size(1)
         res = self.rb[self.rb_pos]
         self.rb_pos = self.rb_pos + 1
-        # return chr(res)
-        return res
+        return chr(res)
+        # return res
 
 #
 # CLASS for a connection with...
