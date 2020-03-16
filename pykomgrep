@@ -211,7 +211,7 @@ class Textlist:
 
         return len(self.textset) == 0
 
-    def check_if_empty(self):
+    def raise_if_empty(self):
         """Raise an error if this list is empty."""
 
         if self.is_empty():
@@ -433,13 +433,13 @@ class Pykomgrep:
                 self.get_conf_no(self.args.author, False))
         if self.args.marked:
             self.textlist.get_all_marks()
-        self.textlist.check_if_empty()
+        self.textlist.raise_if_empty()
 
         if self.args.since:
             self.textlist.texts_since(self.args.since)
         if self.args.before:
             self.textlist.texts_before(self.args.before)
-        self.textlist.check_if_empty()
+        self.textlist.raise_if_empty()
 
         if not self.args.oldest_first:
             self.textlist.reverse()
