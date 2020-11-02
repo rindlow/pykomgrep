@@ -192,17 +192,26 @@ class Cache:
 class Textlist:
     """A container class for managing lists of texts."""
 
-    def __init__(self, conn):
+    def __init__(self, conn, verbose):
+        self.conn = conn
+        self._verbose = verbose
         self._reverse = False
         self.textset = set()
-        self.conn = conn
         self.cache = Cache()
+        self.statistics = {'textstat': {'hits': 0, 'misses': 0},
+                           'text': {'hits': 0, 'misses': 0}}
         signal.signal(signal.SIGINT, self.graceful)
+
+    def verbose(self, message):
+        """Print message if verbose flag is set."""
+        if self._verbose:
+            print(message)
 
     def graceful(self, signal_received, _):
         """Commit cache and exit gracefully."""
 
         self.cache.commit()
+        self.verbose_statistics()
         print('Exiting on command')
         sys.exit(signal_received != signal.SIGINT)
 
@@ -229,13 +238,20 @@ class Textlist:
             conf = kom.ReqGetConfStat(self.conn, conf_no).response()
             start = conf.first_local_no
         texts = set(self.cache.global_text_list(conf_no))
-        while (ltg := kom.ReqLocalToGlobal(self.conn,
+
+        uconf = kom.ReqGetUconfStat(self.conn, conf_no).response()
+        if uconf.highest_local_no > start:
+            while True:
+                ltg = kom.ReqLocalToGlobal(self.conn,
                                            conf_no,
                                            start,
-                                           255).response()).later_texts_exists:
-            texts.update(set(ltg.dict.values()))
-            self.cache.add_local_to_global(conf_no, ltg.list)
-            start = ltg.range_end
+                                           255).response()
+                texts.update(set(ltg.dict.values()))
+                self.cache.add_local_to_global(conf_no, ltg.list)
+                if not ltg.later_texts_exists:
+                    break
+                start = ltg.range_end
+
         texts.discard(0)
 
         if self.is_empty():
@@ -250,13 +266,15 @@ class Textlist:
             pers = kom.ReqGetPersonStat(self.conn, pers_no).response()
             start = pers.first_created_local_no
         texts = set(self.cache.created_text_list(pers_no))
-        while (mct := kom.ReqMapCreatedTexts(
-                self.conn,
-                pers_no,
-                start,
-                255).response()).later_texts_exists:
+        while True:
+            mct = kom.ReqMapCreatedTexts(self.conn,
+                                         pers_no,
+                                         start,
+                                         255).response()
             texts.update(set(mct.dict.values()))
             self.cache.add_created_texts(pers_no, mct.list)
+            if not mct.later_texts_exists:
+                break
             start = mct.range_end
         texts.discard(0)
 
@@ -281,7 +299,9 @@ class Textlist:
         """Get textstat for a text."""
 
         if textstat := self.cache.textstat(text_no):
+            self.statistics['textstat']['hits'] += 1
             return textstat
+        self.statistics['textstat']['misses'] += 1
 
         stat = kom.ReqGetTextStat(self.conn, text_no).response()
         encoding = 'latin1'
@@ -300,7 +320,9 @@ class Textlist:
         """Get text content."""
 
         if text := self.cache.content(text_no):
+            self.statistics['text']['hits'] += 1
             return text
+        self.statistics['text']['misses'] += 1
 
         try:
             text = kom.ReqGetText(self.conn, text_no).response()
@@ -345,12 +367,21 @@ class Textlist:
         left = 0
         right = len(texts) - 1
         while left < right:
-            i = left + (right - left) / 2
+            i = left + (right - left) // 2
             if self.get_textstat(texts[i]).creation_time >= timestamp:
                 right = i
             else:
                 left = i + 1
         self.textset = set(texts[:left])
+
+    def verbose_statistics(self):
+        """Print statistics if verbose flag is set."""
+        if self._verbose:
+            print('Cache Statistics:')
+            for stat in self.statistics:
+                print(f' {stat:>8}'
+                      f' hits: {self.statistics[stat]["hits"]:>6d}'
+                      f' misses: {self.statistics[stat]["misses"]:>6d}')
 
     def grep(self, pattern, include_subject, ignore_case):
         """Grep through all texts in textlist."""
@@ -358,59 +389,68 @@ class Textlist:
         flags = 0
         if ignore_case:
             flags = re.I
+
+        self.verbose(f'{len(self.textset)} texts to search')
+
         for text_no in sorted(self.textset, reverse=self._reverse):
             text = self.get_text(text_no)
+            if text is None:
+                self.verbose(f'text {text_no} not found')
+                continue
             if not include_subject:
                 try:
                     text = text[text.find('\n'):]
-                except ValueError:
+                except AttributeError:
                     pass
             matches = re.findall(f'.*{pattern}.*', text, flags)
             for match in matches:
-                print(f'{text_no: >10} {match}')
+                print(f'{text_no: >8} {match}')
         self.cache.commit()
+        self.verbose_statistics()
 
+
+def parse_cmdline():
+    """Parse command line arguments."""
+
+    parser = argparse.ArgumentParser(description='Grep in LysKOM texts')
+    parser.add_argument('--conf', '-c', action='store',
+                        help='search only texts in conference CONF')
+    parser.add_argument('--author', '-a', action='store',
+                        help='search only texts by author AUTHOR')
+    parser.add_argument('--marked', '-m', action='store_true',
+                        help='search only marked texts')
+    parser.add_argument('--since', '-s', action='store', metavar='DATE',
+                        type=parsetime,
+                        help='search only texts written since DATE')
+    parser.add_argument('--before', '-b', action='store', metavar='DATE',
+                        type=parsetime,
+                        help='search only texts written before DATE')
+    parser.add_argument('--oldest-first', '-o', action='store_true',
+                        help='start with the oldest text found')
+    parser.add_argument('--ignore-case', '-i', action='store_true',
+                        help='ignore the case of the search string')
+    parser.add_argument('--include_subject', '-S', action='store_true',
+                        help='include the subject line in the search')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='show more information')
+    parser.add_argument('pattern', help='to search for')
+    komconnect.add_server_name_password(parser)
+    return parser.parse_args()
 
 class Pykomgrep:
     """Grep through lyskom texts to find the information you need."""
 
     def __init__(self):
-        self.parse_cmdline()
+        self.args = parse_cmdline()
         self.conn = komconnect.connect_and_login(self.args)
 
-        self.textlist = Textlist(self.conn)
+        self.textlist = Textlist(self.conn, self.args.verbose)
         self.populate_textlist()
 
         self.textlist.grep(self.args.pattern, self.args.include_subject,
                            self.args.ignore_case)
 
         kom.ReqLogout(self.conn)
-
-    def parse_cmdline(self):
-        """Parse command line arguments."""
-
-        parser = argparse.ArgumentParser(description='Grep in LysKOM texts')
-        parser.add_argument('--conf', '-c', action='store',
-                            help='search only texts in conference CONF')
-        parser.add_argument('--author', '-a', action='store',
-                            help='search only texts by author AUTHOR')
-        parser.add_argument('--marked', '-m', action='store_true',
-                            help='search only marked texts')
-        parser.add_argument('--since', '-s', action='store', metavar='DATE',
-                            type=parsetime,
-                            help='search only texts written since DATE')
-        parser.add_argument('--before', '-b', action='store', metavar='DATE',
-                            type=parsetime,
-                            help='search only texts written before DATE')
-        parser.add_argument('--oldest-first', '-o', action='store_true',
-                            help='start with the oldest text found')
-        parser.add_argument('--ignore-case', '-i', action='store_true',
-                            help='ignore the case of the search string')
-        parser.add_argument('--include_subject', '-S', action='store_true',
-                            help='include the subject line in the search')
-        parser.add_argument('pattern', help='to search for')
-        komconnect.add_server_name_password(parser)
-        self.args = parser.parse_args()
 
     def get_conf_no(self, name, want_confs):
         """Get conference number for person or conference."""
