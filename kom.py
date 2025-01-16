@@ -1,9 +1,9 @@
 # -*- coding: iso-8859-1 -*-
 # LysKOM Protocol A version 10/11 client interface for Python
 # $Id: kom.py,v 1.40 2004-07-18 19:58:24 astrand Exp $
-# (C) 1999-2002 Kent Engström. Released under GPL.
+# (C) 1999-2002 Kent Engstrï¿½m. Released under GPL.
 
-import cgi
+import urllib.parse
 import socket
 import time
 import select
@@ -2991,7 +2991,7 @@ class CachedConnection(Connection):
             return 'latin1'
 
         try:
-            encoding = cgi.parse_qs(content_type)['charset'][0]
+            encoding = urllib.parse.parse_qs(content_type)['charset'][0]
         except KeyError:
             encoding = 'latin1'
         return encoding
