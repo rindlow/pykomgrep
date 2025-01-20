@@ -1,8 +1,9 @@
 # -*- coding: iso-8859-1 -*-
 # Utility routines for connection setup (replaces komparam.py)
 # $Id: komconnect.py,v 1.2 2007-01-15 21:02:37 kent Exp $
-# (C) 1999,2003 Kent Engström. Released under GPL.
+# (C) 1999,2003 Kent Engstrï¿½m. Released under GPL.
 
+import argparse
 import getpass
 import os
 
@@ -21,7 +22,7 @@ class Error(Exception):
 # option parser.
 
 
-def add_server_name_password(parser):
+def add_server_name_password(parser: argparse.ArgumentParser):
     ogrp = parser.add_argument_group("connection arguments")
     ogrp.add_argument("--server", action="store",
                       help="connect to SERVER")
@@ -34,7 +35,7 @@ def add_server_name_password(parser):
 # (e.g. one set up using add_server_name_password)
 
 
-def connect_and_login(options, connection_class=kom.CachedConnection):
+def connect_and_login(options: argparse.Namespace):
 
     # Get server
     server = options.server
@@ -62,7 +63,7 @@ def connect_and_login(options, connection_class=kom.CachedConnection):
 
     # Connect
     try:
-        conn = connection_class(server)
+        conn = kom.CachedConnection(server, trace=False)
     except kom.LocalError as err:
         raise Error(f"failed to connect ({err})")
 

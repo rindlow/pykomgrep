@@ -5,10 +5,11 @@ Grep through lyskom texts to find the information you need.
 """
 
 import argparse
-import collections
 import os.path
 import re
 import time
+import types
+import typing
 import signal
 import sqlite3
 import sys
@@ -17,16 +18,20 @@ import kom
 import komconnect
 
 
-def parsetime(string):
+def parsetime(string: str):
     """Parse a time string and return a UNIX timestamp"""
 
     try:
         return time.mktime(time.strptime(string, '%Y-%m-%d'))
-    except ValueError:
-        raise argparse.ArgumentTypeError(f'{string:r} not in format %Y-%m-%d')
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(
+            f'{string:r} not in format %Y-%m-%d') from e
 
 
-TextStat = collections.namedtuple('TextStat', ['creation_time', 'encoding'])
+class TextStat(typing.NamedTuple):
+    """Cache information for TextStat"""
+    creation_time: float
+    encoding: str
 
 
 class ArgumentError(Exception):
@@ -74,12 +79,12 @@ class Cache:
                )''')
             self.conn.commit()
 
-    def commit(self):
+    def commit(self) -> None:
         """Commit changes to the database."""
 
         self.conn.commit()
 
-    def textstat(self, textno):
+    def textstat(self, textno: int) -> TextStat | None:
         """Try fetching a textstat from cache."""
 
         cursor = self.conn.cursor()
@@ -91,7 +96,7 @@ class Cache:
             return TextStat(*res)
         return None
 
-    def add_textstat(self, textno, textstat):
+    def add_textstat(self, textno: int, textstat: TextStat) -> None:
         """Add a textstat to the cache."""
 
         cursor = self.conn.cursor()
@@ -100,7 +105,7 @@ class Cache:
                  VALUES (?, ?, ?)''',
                        (textno, textstat.creation_time, textstat.encoding))
 
-    def content(self, textno):
+    def content(self, textno: int) -> str | None:
         """Try fetching text content from cache."""
 
         cursor = self.conn.cursor()
@@ -112,7 +117,7 @@ class Cache:
             return res[0]
         return None
 
-    def add_content(self, textno, content):
+    def add_content(self, textno: int, content: str | None) -> None:
         """Add text content to the cache."""
 
         cursor = self.conn.cursor()
@@ -120,7 +125,7 @@ class Cache:
             INSERT INTO text_cache
                  VALUES (?, ?)''', (textno, content))
 
-    def last_local(self, confno):
+    def last_local(self, confno: int) -> int | None:
         """Try fetching the last local textno from cache."""
 
         cursor = self.conn.cursor()
@@ -132,7 +137,7 @@ class Cache:
             return res[0]
         return None
 
-    def global_text_list(self, confno):
+    def global_text_list(self, confno: int) -> list[int]:
         """Try fetching the global textnos from cache."""
 
         cursor = self.conn.cursor()
@@ -146,7 +151,8 @@ class Cache:
             return [row[0] for row in res]
         return []
 
-    def add_local_to_global(self, confno, ltg):
+    def add_local_to_global(self, confno: int,
+                            ltg: list[tuple[int, int]]) -> None:
         """Add a list of local/global tuples to cache."""
 
         cursor = self.conn.cursor()
@@ -154,7 +160,7 @@ class Cache:
             INSERT INTO local_to_global_cache
                  VALUES (?, ?, ?)''', ((confno, e[0], e[1]) for e in ltg))
 
-    def last_created(self, persno):
+    def last_created(self, persno: int) -> int | None:
         """Try fetching the last created textno from cache."""
 
         cursor = self.conn.cursor()
@@ -166,7 +172,7 @@ class Cache:
             return res[0]
         return None
 
-    def created_text_list(self, persno):
+    def created_text_list(self, persno: int) -> list[int]:
         """Try fetching the created textnos from cache."""
 
         cursor = self.conn.cursor()
@@ -180,7 +186,8 @@ class Cache:
             return [row[0] for row in res]
         return []
 
-    def add_created_texts(self, persno, mct):
+    def add_created_texts(self, persno: int,
+                          mct: list[tuple[int, int]]) -> None:
         """Add a list of created local/global tuples to cache."""
 
         cursor = self.conn.cursor()
@@ -192,22 +199,23 @@ class Cache:
 class Textlist:
     """A container class for managing lists of texts."""
 
-    def __init__(self, conn, verbose):
+    def __init__(self, conn: kom.Connection, verbose: bool):
         self.conn = conn
         self._verbose = verbose
         self._reverse = False
-        self.textset = set()
+        self.textset: set[int] = set()
         self.cache = Cache()
         self.statistics = {'textstat': {'hits': 0, 'misses': 0},
                            'text': {'hits': 0, 'misses': 0}}
         signal.signal(signal.SIGINT, self.graceful)
 
-    def verbose(self, message):
+    def verbose(self, message: str):
         """Print message if verbose flag is set."""
         if self._verbose:
             print(message)
 
-    def graceful(self, signal_received, _):
+    def graceful(self, signal_received: int,
+                 _: types.FrameType | None) -> None:
         """Commit cache and exit gracefully."""
 
         self.cache.commit()
@@ -215,23 +223,23 @@ class Textlist:
         print('Exiting on command')
         sys.exit(signal_received != signal.SIGINT)
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         """Is this list empty?"""
 
         return len(self.textset) == 0
 
-    def raise_if_empty(self):
+    def raise_if_empty(self) -> None:
         """Raise an error if this list is empty."""
 
         if self.is_empty():
             raise EmptyListError
 
-    def reverse(self):
+    def reverse(self) -> None:
         """Reverse this list."""
 
         self._reverse = not self._reverse
 
-    def get_textnos_in_conf(self, conf_no):
+    def get_textnos_in_conf(self, conf_no: int) -> None:
         """Get all textnos for conference."""
 
         if (start := self.cache.last_local(conf_no)) is None:
@@ -259,7 +267,7 @@ class Textlist:
         else:
             self.textset.intersection_update(texts)
 
-    def get_textnos_by_author(self, pers_no):
+    def get_textnos_by_author(self, pers_no: int) -> None:
         """Get all textnos by author."""
 
         if (start := self.cache.last_created(pers_no)) is None:
@@ -283,7 +291,7 @@ class Textlist:
         else:
             self.textset.intersection_update(texts)
 
-    def get_all_marks(self):
+    def get_all_marks(self) -> None:
         """Get users all marked texts."""
 
         marks = kom.ReqGetMarks(self.conn).response()
@@ -295,7 +303,7 @@ class Textlist:
         else:
             self.textset.intersection_update(texts)
 
-    def get_textstat(self, text_no):
+    def get_textstat(self, text_no: int) -> TextStat:
         """Get textstat for a text."""
 
         if textstat := self.cache.textstat(text_no):
@@ -306,8 +314,8 @@ class Textlist:
         stat = kom.ReqGetTextStat(self.conn, text_no).response()
         encoding = 'latin1'
         for aux_item in stat.aux_items:
-            if aux_item.tag == 1:  # content
-                for param in aux_item.data.decode('latin1').split(';')[1:]:
+            if aux_item.tag == 1:  # content-type
+                for param in aux_item.data.split(';')[1:]:
                     attr, value = param.strip().split('=')
                     if attr == 'charset' and value not in ('us-ascii',
                                                            'x-ctext'):
@@ -316,7 +324,7 @@ class Textlist:
         self.cache.add_textstat(text_no, textstat)
         return textstat
 
-    def get_text(self, text_no):
+    def get_text(self, text_no: int) -> str | None:
         """Get text content."""
 
         if text := self.cache.content(text_no):
@@ -334,7 +342,7 @@ class Textlist:
         self.cache.add_content(text_no, text)
         return text
 
-    def texts_since(self, timestamp):
+    def texts_since(self, timestamp: float) -> None:
         """Filter textlist by date."""
 
         texts = sorted(self.textset)
@@ -354,7 +362,7 @@ class Textlist:
                 left = i + 1
         self.textset = set(texts[left:])
 
-    def texts_before(self, timestamp):
+    def texts_before(self, timestamp: float) -> None:
         """Filter textlist by date."""
 
         texts = sorted(self.textset)
@@ -374,16 +382,17 @@ class Textlist:
                 left = i + 1
         self.textset = set(texts[:left])
 
-    def verbose_statistics(self):
+    def verbose_statistics(self) -> None:
         """Print statistics if verbose flag is set."""
         if self._verbose:
             print('Cache Statistics:')
-            for stat in self.statistics:
+            for stat, stats in self.statistics.items():
                 print(f' {stat:>8}'
-                      f' hits: {self.statistics[stat]["hits"]:>6d}'
-                      f' misses: {self.statistics[stat]["misses"]:>6d}')
+                      f' hits: {stats["hits"]:>6d}'
+                      f' misses: {stats["misses"]:>6d}')
 
-    def grep(self, pattern, include_subject, ignore_case):
+    def grep(self, pattern: str, include_subject: bool,
+             ignore_case: bool) -> None:
         """Grep through all texts in textlist."""
 
         flags = 0
@@ -437,6 +446,7 @@ def parse_cmdline():
     komconnect.add_server_name_password(parser)
     return parser.parse_args()
 
+
 class Pykomgrep:
     """Grep through lyskom texts to find the information you need."""
 
@@ -452,7 +462,7 @@ class Pykomgrep:
 
         kom.ReqLogout(self.conn)
 
-    def get_conf_no(self, name, want_confs):
+    def get_conf_no(self, name: str, want_confs: bool):
         """Get conference number for person or conference."""
 
         matches = self.conn.lookup_name(name, 1, int(want_confs))
